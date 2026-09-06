@@ -1,0 +1,125 @@
+---
+title: "Drake & Competing Artists: Billboard Hot 100"
+author: "Britten"
+format:
+  html:
+    theme: cosmo
+---
+
+# Project
+
+For my data science project I want to create a website analyzing Drake’s music career and success over time. I will use data such as Billboard rankings, Spotify streams, album releases, and collaborations to create interactive graphs that show how his music and popularity have changed throughout his career.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(rvest)
+library(DT)
+library(plotly)
+library(crosstalk)
+
+# Function to scrape Billboard Hot 100 data for any artist
+get_artist_chart <- \(artist_slug) {
+  url <- str_c("https://www.billboard.com/artist/", artist_slug, "/chart-history/")
+  page <- read_html(url)
+
+  formatted_name <- case_match(
+    artist_slug,
+    "j-cole" ~ "J. Cole",
+    .default = str_to_title(str_replace_all(artist_slug, "-", " "))
+  )
+
+  tibble(
+    lead_artist = formatted_name,
+    title = page |> html_elements(".artist-chart-row-title") |> html_text2(),
+    artist = page |> html_elements(".artist-chart-row-artist") |> html_text2(),
+    debut_date = page |> html_elements(".artist-chart-row-debut-date") |> html_text2() |> mdy(),
+    peak_pos = page |> html_elements(".artist-chart-row-peak-pos") |> html_text2() |> as.integer(),
+    peak_date = page |> html_elements(".artist-chart-row-peak-date") |> html_text2() |> mdy(),
+    weeks_on_chart = page |> html_elements(".artist-chart-row-week-on-chart") |> html_text2() |> as.integer()
+  )
+}
+
+# Drake and top competing artists in Hip-Hop / Rap on Billboard
+comparison_artists <- c(
+  "drake", "kendrick-lamar", "j-cole", "future", "travis-scott",
+  "kanye-west", "lil-wayne", "eminem", "nicki-minaj", "21-savage"
+)
+
+songs <- map(comparison_artists, get_artist_chart) |> 
+  list_rbind()
+```
+
+## Songs Over the Years
+
+Compare Drake's output with competing artists over time. Use the search bar below to select and compare any artists.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Calculate number of new Hot 100 songs per year for each artist
+yearly_songs <- songs |> 
+  mutate(year = year(debut_date)) |> 
+  filter(!is.na(year)) |> 
+  count(lead_artist, year, name = "song_count") |> 
+  group_by(lead_artist) |> 
+  complete(year = full_seq(year, 1), fill = list(song_count = 0)) |> 
+  ungroup()
+
+# Set up Crosstalk shared data
+shared_yearly <- SharedData$new(yearly_songs, key = ~lead_artist)
+
+# Search bar / selector to pick artists to compare
+artist_filter <- filter_select(
+  id = "artist_selector",
+  label = "Type or select artists to compare:",
+  sharedData = shared_yearly,
+  group = ~lead_artist
+)
+
+# Interactive line plot
+line_plot <- plot_ly(
+  shared_yearly,
+  x = ~year,
+  y = ~song_count,
+  color = ~lead_artist,
+  type = "scatter",
+  mode = "lines+markers"
+) |> 
+  layout(
+    xaxis = list(title = "Year", dtick = 2),
+    yaxis = list(title = "Hot 100 Entries That Year"),
+    hovermode = "x unified"
+  )
+
+bscols(
+  widths = c(12),
+  artist_filter,
+  line_plot
+)
+```
+
+## Interactive Song Catalog
+
+Browse and filter all charted songs across artists.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Interactive table with column filters to search and compare artists
+datatable(
+  songs,
+  rownames = FALSE,
+  filter = "top",
+  colnames = c("Artist", "Song Title", "Credit", "Debut Date", "Peak Position", "Peak Date", "Weeks on Chart"),
+  options = list(pageLength = 10, autoWidth = TRUE)
+)
+```
+
