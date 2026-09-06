@@ -1,14 +1,16 @@
 ---
-title: "Drake & Competing Artists: Billboard Hot 100"
+title: "Drake & The Rap Industry: Billboard Hot 100"
 author: "Britten"
 format:
   html:
-    theme: cosmo
+    theme: flatly
+    toc: true
+    toc-title: "Navigation"
 ---
 
-# Project
+# Project Overview
 
-For my data science project I want to create a website analyzing Drake’s music career and success over time. I will use data such as Billboard rankings, Spotify streams, album releases, and collaborations to create interactive graphs that show how his music and popularity have changed throughout his career.
+For my data science project, I am analyzing Drake’s music career and commercial longevity compared to his peers in the hip-hop industry. Using data scraped from Billboard's official chart history, this page explores how Drake’s output compares to fellow dominant rap artists from 2009 through 2026.
 
 ```{r}
 #| echo: false
@@ -19,17 +21,16 @@ library(tidyverse)
 library(rvest)
 library(DT)
 library(plotly)
-library(crosstalk)
 
 # Function to scrape Billboard Hot 100 data for any artist
 get_artist_chart <- \(artist_slug) {
   url <- str_c("https://www.billboard.com/artist/", artist_slug, "/chart-history/")
   page <- read_html(url)
 
-  formatted_name <- case_match(
-    artist_slug,
-    "j-cole" ~ "J. Cole",
-    .default = str_to_title(str_replace_all(artist_slug, "-", " "))
+  formatted_name <- if_else(
+    artist_slug == "j-cole",
+    "J. Cole",
+    str_to_title(str_replace_all(artist_slug, "-", " "))
   )
 
   tibble(
@@ -53,73 +54,144 @@ songs <- map(comparison_artists, get_artist_chart) |>
   list_rbind()
 ```
 
-## Songs Over the Years
+## Yearly Output Comparison (2009–2026)
 
-Compare Drake's output with competing artists over time. Use the search bar below to select and compare any artists.
+The line graph below compares Drake’s annual Hot 100 debuts directly against one competitor at a time. Use the dropdown menu in the upper-right corner of the chart to select a competitor.
 
 ```{r}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Calculate number of new Hot 100 songs per year for each artist
+# Calculate accurate Hot 100 debuts per year for each artist (2009-2026)
+years_range <- 2009:2026
+
 yearly_songs <- songs |> 
   mutate(year = year(debut_date)) |> 
-  filter(!is.na(year)) |> 
+  filter(!is.na(year), year >= min(years_range), year <= max(years_range)) |> 
   count(lead_artist, year, name = "song_count") |> 
   group_by(lead_artist) |> 
-  complete(year = full_seq(year, 1), fill = list(song_count = 0)) |> 
+  complete(year = years_range, fill = list(song_count = 0)) |> 
   ungroup()
 
-# Set up Crosstalk shared data
-shared_yearly <- SharedData$new(yearly_songs, key = ~lead_artist)
+drake_data <- yearly_songs |> filter(lead_artist == "Drake")
 
-# Search bar / selector to pick artists to compare
-artist_filter <- filter_select(
-  id = "artist_selector",
-  label = "Type or select artists to compare:",
-  sharedData = shared_yearly,
-  group = ~lead_artist
+competitors <- c(
+  "Kendrick Lamar", "J. Cole", "Future", "Travis Scott",
+  "Kanye West", "Lil Wayne", "Eminem", "Nicki Minaj", "21 Savage"
 )
 
-# Interactive line plot
-line_plot <- plot_ly(
-  shared_yearly,
-  x = ~year,
-  y = ~song_count,
-  color = ~lead_artist,
-  type = "scatter",
-  mode = "lines+markers"
-) |> 
-  layout(
-    xaxis = list(title = "Year", dtick = 2),
-    yaxis = list(title = "Hot 100 Entries That Year"),
-    hovermode = "x unified"
+# Start plot with Drake as the baseline
+line_plot <- plot_ly() |> 
+  add_trace(
+    data = drake_data,
+    x = ~year,
+    y = ~song_count,
+    name = "Drake",
+    type = "scatter",
+    mode = "lines+markers",
+    line = list(color = "#1E3A8A", width = 3, shape = "spline"),
+    marker = list(color = "#1E3A8A", size = 7, line = list(color = "#FFFFFF", width = 1.5)),
+    hovertemplate = "<b>Drake</b><br>Year: %{x}<br>Songs Debuted: %{y}<extra></extra>"
   )
 
-bscols(
-  widths = c(12),
-  artist_filter,
-  line_plot
-)
+# Add traces for each competitor (Kendrick Lamar is visible by default)
+for (i in seq_along(competitors)) {
+  comp_name <- competitors[i]
+  comp_data <- yearly_songs |> filter(lead_artist == comp_name)
+  is_visible <- (i == 1)
+
+  line_plot <- line_plot |> 
+    add_trace(
+      data = comp_data,
+      x = ~year,
+      y = ~song_count,
+      name = comp_name,
+      type = "scatter",
+      mode = "lines+markers",
+      visible = is_visible,
+      line = list(color = "#DC2626", width = 2.5, shape = "spline"),
+      marker = list(color = "#DC2626", size = 7, line = list(color = "#FFFFFF", width = 1.5)),
+      hovertemplate = paste0("<b>", comp_name, "</b><br>Year: %{x}<br>Songs Debuted: %{y}<extra></extra>")
+    )
+}
+
+# Dropdown menu to switch competitors
+buttons <- map(seq_along(competitors), \(i) {
+  vis <- c(TRUE, rep(FALSE, length(competitors)))
+  vis[i + 1] <- TRUE
+  list(
+    method = "update",
+    args = list(list(visible = vis)),
+    label = competitors[i]
+  )
+})
+
+line_plot |> 
+  layout(
+    title = list(
+      text = "<b>Annual Hot 100 Entries: Drake vs. Peer</b>",
+      x = 0,
+      font = list(size = 17, color = "#1F2937")
+    ),
+    plot_bgcolor = "#F9FAFB",
+    paper_bgcolor = "#FFFFFF",
+    xaxis = list(
+      title = "Year",
+      dtick = 2,
+      gridcolor = "#E5E7EB",
+      zerolinecolor = "#D1D5DB"
+    ),
+    yaxis = list(
+      title = "Songs Debuting on Hot 100",
+      gridcolor = "#E5E7EB",
+      zerolinecolor = "#D1D5DB"
+    ),
+    hovermode = "x unified",
+    legend = list(
+      orientation = "h",
+      x = 0.5,
+      y = -0.22,
+      xanchor = "center",
+      yanchor = "top"
+    ),
+    updatemenus = list(
+      list(
+        type = "dropdown",
+        active = 0,
+        x = 1.0,
+        y = 1.15,
+        xanchor = "right",
+        yanchor = "bottom",
+        bgcolor = "#FFFFFF",
+        bordercolor = "#D1D5DB",
+        buttons = buttons
+      )
+    ),
+    margin = list(t = 70, b = 60, l = 50, r = 20)
+  )
 ```
 
 ## Interactive Song Catalog
 
-Browse and filter all charted songs across artists.
+Use the search boxes at the top of each column to filter songs by title, artist, debut date, or peak chart performance.
 
 ```{r}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Interactive table with column filters to search and compare artists
 datatable(
   songs,
   rownames = FALSE,
   filter = "top",
-  colnames = c("Artist", "Song Title", "Credit", "Debut Date", "Peak Position", "Peak Date", "Weeks on Chart"),
-  options = list(pageLength = 10, autoWidth = TRUE)
+  class = "hover stripe compact cell-border",
+  colnames = c("Artist", "Song Title", "Full Credit", "Debut Date", "Peak Position", "Peak Date", "Weeks on Chart"),
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE,
+    scrollX = TRUE
+  )
 )
 ```
 
